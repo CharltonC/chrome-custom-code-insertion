@@ -13,7 +13,7 @@ const fileHandle = new FileHandle();
 const rowSelectHandle = new RowSelectHandle();
 
 export class StateHandler extends StateHandle.BaseStoreHandler {
-    //// Router/Views
+    //// GENERAL
     onListView({localState}: AppState): Partial<AppState> {
         const { pgnIncrmIdx } = localState;   // maintain the only pagination setting
         const resetLocalState = new LocalState();
@@ -27,7 +27,65 @@ export class StateHandler extends StateHandle.BaseStoreHandler {
         };
     }
 
-    //// DataGrid
+    onListItemClick({ localState }: AppState, ...[, { item }]) {
+        return {
+            localState: {
+                ...localState,
+                targetItem: item,
+            }
+        };
+    }
+
+    onSearch({ localState, rules }: AppState, evt, val: string, gte3Char: boolean): Partial<AppState> {
+        const baseLocalState = {
+            ...localState,
+            searchedText: val
+        };
+
+        if (!val) return {
+            localState: {
+                ...baseLocalState,
+                searchedRules: null,
+            }
+        };
+
+        if (!gte3Char) return { localState: baseLocalState };
+
+        const searchedRules: HostRuleConfig[] = val
+            .split(/\s+/)
+            .reduce((filteredRules: HostRuleConfig[], text: string) => {
+                return filteredRules.filter(({ id, value, paths }: HostRuleConfig) => {
+                    const isIdMatch = id.indexOf(text) !== -1;
+                    if (isIdMatch) return true;
+
+                    const isValMatch = value.indexOf(text) !== -1;
+                    if (isValMatch) return true;
+
+                    return paths.some(({ id: childId, value: childValue}) => {
+                        return (childId.indexOf(text) !== -1) || (childValue.indexOf(text) !== -1);
+                    });
+                });
+            }, rules);
+
+        return {
+            localState: {
+                ...baseLocalState,
+                searchedRules,
+            }
+        };
+    }
+
+    onSearchClear({ localState }: AppState) {
+        return {
+            localState: {
+                ...localState,
+                searchedRules: null,
+                searchedText: ''
+            }
+        };
+    }
+
+
     onPaginate({ localState}: AppState, { curr, perPage, startIdx, endIdx }) {
         const pgnIncrmIdx: number = resultsPerPage.indexOf(perPage);
 
@@ -48,6 +106,7 @@ export class StateHandler extends StateHandle.BaseStoreHandler {
         };
     }
 
+    //// TABLE ROW
     onRowsSelectToggle({ localState }: AppState): Partial<AppState> {
         const { areAllRowsSelected, selectedRowKeys } = localState;
 
@@ -83,21 +142,18 @@ export class StateHandler extends StateHandle.BaseStoreHandler {
         };
     }
 
+
+    onRowSwitchToggle({ rules }: AppState, idx: number, key: string): Partial<AppState> {
+        const clone = rules.slice();
+        const value = clone[idx][key];
+        clone[idx][key] = !value;
+        return { rules: clone };
+    }
+
     onRowJsStageChange({ rules }: AppState, idx: number, modIdx): Partial<AppState> {
         const clone = rules.slice();
         clone[idx].jsExecPhase = modIdx;
         return { rules: clone };
-    }
-
-    onRowEdit(state: AppState, targetItem): Partial<AppState> {
-        const { localState } = state;
-        return {
-            localState: {
-                ...localState,
-                targetItem,
-                currView: 'EDIT'
-            }
-        };
     }
 
     onRowExpand({ localState }: AppState, expdState: Record<string, number>) {
@@ -112,11 +168,15 @@ export class StateHandler extends StateHandle.BaseStoreHandler {
         };
     }
 
-    onRowSwitchToggle({ rules }: AppState, idx: number, key: string): Partial<AppState> {
-        const clone = rules.slice();
-        const value = clone[idx][key];
-        clone[idx][key] = !value;
-        return { rules: clone };
+    onRowEdit(state: AppState, targetItem): Partial<AppState> {
+        const { localState } = state;
+        return {
+            localState: {
+                ...localState,
+                targetItem,
+                currView: 'EDIT'
+            }
+        };
     }
 
     onRowRmv({ localState }: AppState, idx: number, parentIdx?: number) {
@@ -269,68 +329,249 @@ export class StateHandler extends StateHandle.BaseStoreHandler {
         };
     }
 
-    //// Edit View
-    onListItemClick({ localState }: AppState, ...[, { item }]) {
+    //// MODALS OPEN/CANCEL
+    onModalOpen({ localState }: AppState, currModalId: string): Partial<AppState> {
         return {
             localState: {
                 ...localState,
-                targetItem: item,
+                currModalId
             }
         };
     }
 
-    //// Search
-    // TODO: debounce
-    onSearch({ localState, rules }: AppState, evt, val: string, gte3Char: boolean): Partial<AppState> {
-        const baseLocalState = {
+    onModalCancel({ localState }: AppState): Partial<AppState> {
+        return {
+            localState: {
+                ...localState,
+                currModalId: null,
+                allowModalConfirm: false,
+                targetItem: null,
+                targetItemIdx: null,
+                targetChildItemIdx: null,
+                isTargetItemIdValid:  false,
+                isTargetItemValValid:  false,
+            }
+        };
+    }
+
+    onSettingModal(state: AppState) {
+        return this.reflect.onModalOpen(state, defSetting.id);
+    }
+
+    onImportConfigModal(state: AppState) {
+        return this.reflect.onModalOpen(state, importConfig.id);
+    }
+
+    onExportConfigModal(state: AppState) {
+        return this.reflect.onModalOpen(state, exportConfig.id);
+    }
+
+    onDelModal(appState: AppState, {sortedData, ctxIdx, parentCtxIdx}) {
+        const { localState, setting } = appState;
+        const { showDeleteModal } = setting;
+        const isDelSingleItem = typeof ctxIdx !== 'undefined';
+        const baseModState = {
             ...localState,
-            searchedText: val
+            sortedData: sortedData.concat(),
+            currModalId: removeConfirm.id,
         };
-
-        if (!val) return {
-            localState: {
-                ...baseLocalState,
-                searchedRules: null,
-            }
+        const partialModState: Partial<AppState> = {
+            localState: isDelSingleItem ? {
+                    ...baseModState,
+                    targetChildItemIdx: ctxIdx,
+                    targetItemIdx: parentCtxIdx
+                } : baseModState
         };
-
-        if (!gte3Char) return { localState: baseLocalState };
-
-        const searchedRules: HostRuleConfig[] = val
-            .split(/\s+/)
-            .reduce((filteredRules: HostRuleConfig[], text: string) => {
-                return filteredRules.filter(({ id, value, paths }: HostRuleConfig) => {
-                    const isIdMatch = id.indexOf(text) !== -1;
-                    if (isIdMatch) return true;
-
-                    const isValMatch = value.indexOf(text) !== -1;
-                    if (isValMatch) return true;
-
-                    return paths.some(({ id: childId, value: childValue}) => {
-                        return (childId.indexOf(text) !== -1) || (childValue.indexOf(text) !== -1);
-                    });
-                });
-            }, rules);
-
-        return {
-            localState: {
-                ...baseLocalState,
-                searchedRules,
-            }
-        };
+        return showDeleteModal ? partialModState : this.reflect.onDelModalConfirm({...appState, ...partialModState});
     }
 
-    onSearchClear({ localState }: AppState) {
+    onAddHostModal({ localState }: AppState) {
         return {
             localState: {
                 ...localState,
-                searchedRules: null,
-                searchedText: ''
+                currModalId: editHost.id,
+                targetItem: new HostRuleConfig('', '')
             }
         };
     }
 
-    //// Settings
+    onAddPathModal({ localState }: AppState, idx: number) {
+        return {
+            localState: {
+                ...localState,
+                currModalId: editPath.id,
+                targetItemIdx: idx,
+                targetItem: new PathRuleConfig('', '')
+            }
+        };
+    }
+
+    //// MODAL CONFIRMATION
+    onDelModalConfirm(state: AppState) {
+        const { reflect } = this;
+        const { onModalCancel } = this.reflect;
+        const { targetChildItemIdx, targetItemIdx, searchedRules } = state.localState;
+        const isDelSingleItem = Number.isInteger(targetChildItemIdx);
+        const hsSearchResults = searchedRules?.length;
+
+        const resetLocalState = {
+            ...onModalCancel(state).localState,
+            pgnPageIdx: 0,
+            pgnItemStartIdx: 0,
+            pgnItemEndIdx: null,
+            sortedData: null
+        };
+
+        if (isDelSingleItem) {
+            const { rules, localState } = hsSearchResults ?
+                reflect.onSearchedRowRmv(state, targetChildItemIdx, targetItemIdx) :
+                reflect.onRowRmv(state, targetChildItemIdx, targetItemIdx);
+
+            return {
+                rules,
+                localState: {
+                    ...localState,
+                    ...resetLocalState,
+                }
+            };
+
+        // If remove all items
+        } else {
+            const { rules, localState } = hsSearchResults ?
+                reflect.onSearchedRowsRmv(state) :
+                reflect.onRowsRmv(state);
+
+            return {
+                localState: {
+                    ...localState,
+                    ...resetLocalState,
+                },
+                rules
+            };
+        }
+    }
+
+    onAddHostConfirm(state: AppState) {
+        const { localState, rules, setting } = state;
+        const cloneRules = rules.concat();
+        const { targetItem } = localState;
+        const resetState = this.reflect.onModalCancel(state);
+
+        // merge with user config before added
+        Object.assign(targetItem, setting.defRuleConfig);
+        cloneRules.push(localState.targetItem);
+
+        return {
+            ...resetState,
+            rules: cloneRules
+        };
+    }
+
+    onAddPathConfirm({ localState, rules, setting }: AppState) {
+        const cloneRules = rules.concat();
+        const { targetItem, targetItemIdx } = localState;
+        const { isHttps, ...defConfig } = setting.defRuleConfig
+
+        // merge with user config before added
+        Object.assign(targetItem, defConfig);
+        cloneRules[targetItemIdx].paths.push(targetItem);
+
+        return {
+            rules: cloneRules,
+            localState: {
+                ...localState,
+                currModalId: null,
+                targetItemIdx: null,
+                allowModalConfirm: false,
+                isTargetItemIdValid: false,
+                isTargetItemValValid: false,
+            }
+        };
+    }
+
+    async onImportModalConfirm({ localState }: AppState) {
+        return {
+            rules: await fileHandle.readJson(localState.importFile),
+            localState: {
+                ...localState,
+                currView: 'LIST',
+                allowModalConfirm: false,
+                importFile: null,
+                currModalId: null
+            }
+        };
+    }
+
+    onExportModalConfirm({ rules, localState }: AppState) {
+        const { exportFileName } = localState;
+        fileHandle.saveJson(rules, exportFileName, true);
+
+        return {
+            localState: {
+                ...localState,
+                currModalId: null,
+                allowModalConfirm: false,
+                exportFileName: null
+            }
+        };
+    }
+
+    //// MODAL CONTENT/FORM
+    // Add/Edit Rule
+    onEditItemIdChange({ localState }: AppState, { val, validState }) {
+        const { targetItem, isTargetItemValValid } = localState;
+        return {
+            localState: {
+                ...localState,
+                isTargetItemIdValid: validState.isValid,
+                allowModalConfirm: isTargetItemValValid && validState.isValid,
+                targetItem: {
+                    ...targetItem,
+                    id: val
+                },
+            }
+        };
+    }
+
+    onEditItemValChange({ localState }: AppState, { val, validState }) {
+        const { targetItem, isTargetItemIdValid } = localState;
+        return {
+            localState: {
+                ...localState,
+                isTargetItemValValid: validState.isValid,
+                allowModalConfirm: isTargetItemIdValid && validState.isValid,
+                targetItem: {
+                    ...targetItem,
+                    value: val
+                },
+            }
+        };
+    }
+
+    // Import/Export Rule
+    onImportFileChange({ localState }, { target }, { isValid }) {
+        return {
+            localState: {
+                ...localState,
+                importFile: target.files.item(0),
+                allowModalConfirm: isValid
+            }
+        };
+    }
+
+    onExportFileNameChange({ localState }: AppState, { validState, val }) {
+        const isValid = validState?.isValid ?? true;
+
+        return {
+            localState: {
+                ...localState,
+                allowModalConfirm: isValid,
+                exportFileName: isValid ? val : null
+            }
+        };
+    }
+
+    // Setting
     onResultsPerPageChange({ setting }: AppState, resultsPerPageIdx: number) {
         return {
             setting: {
@@ -385,249 +626,7 @@ export class StateHandler extends StateHandle.BaseStoreHandler {
         };
     }
 
-    //// Modals
-    // Generic
-    onModalOpen({ localState }: AppState, currModalId: string): Partial<AppState> {
-        return {
-            localState: {
-                ...localState,
-                currModalId
-            }
-        };
-    }
-
-    onModalCancel({ localState }: AppState): Partial<AppState> {
-        return {
-            localState: {
-                ...localState,
-                currModalId: null,
-                allowModalConfirm: false,
-                targetItem: null,
-                targetItemIdx: null,
-                targetChildItemIdx: null,
-                isTargetItemIdValid:  false,
-                isTargetItemValValid:  false,
-            }
-        };
-    }
-
-    // Setting
-    onSettingModal(state: AppState) {
-        return this.reflect.onModalOpen(state, defSetting.id);
-    }
-
-    onImportConfigModal(state: AppState) {
-        return this.reflect.onModalOpen(state, importConfig.id);
-    }
-
-    onExportConfigModal(state: AppState) {
-        return this.reflect.onModalOpen(state, exportConfig.id);
-    }
-
-    // Delete
-    onDelModal(appState: AppState, {sortedData, ctxIdx, parentCtxIdx}) {
-        const { localState, setting } = appState;
-        const { showDeleteModal } = setting;
-        const isDelSingleItem = typeof ctxIdx !== 'undefined';
-        const baseModState = {
-            ...localState,
-            sortedData: sortedData.concat(),
-            currModalId: removeConfirm.id,
-        };
-        const partialModState: Partial<AppState> = {
-            localState: isDelSingleItem ? {
-                    ...baseModState,
-                    targetChildItemIdx: ctxIdx,
-                    targetItemIdx: parentCtxIdx
-                } : baseModState
-        };
-        return showDeleteModal ? partialModState : this.reflect.onDelModalConfirm({...appState, ...partialModState});
-    }
-
-    onDelModalConfirm(state: AppState) {
-        const { onModalCancel, onSearchedRowRmv, onSearchedRowsRmv, onRowRmv, onRowsRmv } = this.reflect;
-        const { targetChildItemIdx, targetItemIdx, searchedRules } = state.localState;
-        const isDelSingleItem = Number.isInteger(targetChildItemIdx);
-        const hsSearchResults = searchedRules?.length;
-
-        const resetLocalState = {
-            ...onModalCancel(state).localState,
-            pgnPageIdx: 0,
-            pgnItemStartIdx: 0,
-            pgnItemEndIdx: null,
-            sortedData: null
-        };
-
-        if (isDelSingleItem) {
-            const { rules, localState } = hsSearchResults ?
-                onSearchedRowRmv(state, targetChildItemIdx, targetItemIdx) :
-                onRowRmv(state, targetChildItemIdx, targetItemIdx);
-
-            return {
-                rules,
-                localState: {
-                    ...localState,
-                    ...resetLocalState,
-                }
-            };
-
-        // If remove all items
-        } else {
-            const { rules, localState } = hsSearchResults ?
-                onSearchedRowsRmv(state) :
-                onRowsRmv(state);
-
-            return {
-                localState: {
-                    ...localState,
-                    ...resetLocalState,
-                },
-                rules
-            };
-        }
-    }
-
-    // Add/Edit Host/Path
-    onAddHostModal({ localState }: AppState) {
-        return {
-            localState: {
-                ...localState,
-                currModalId: editHost.id,
-                targetItem: new HostRuleConfig('', '')
-            }
-        };
-    }
-
-    onAddHostConfirm(state: AppState) {
-        const { localState, rules, setting } = state;
-        const cloneRules = rules.concat();
-        const { targetItem } = localState;
-        const resetState = this.reflect.onModalCancel(state);
-
-        // merge with user config before added
-        Object.assign(targetItem, setting.defRuleConfig);
-        cloneRules.push(localState.targetItem);
-
-        return {
-            ...resetState,
-            rules: cloneRules
-        };
-    }
-
-    onAddPathModal({ localState }: AppState, idx: number) {
-        return {
-            localState: {
-                ...localState,
-                currModalId: editPath.id,
-                targetItemIdx: idx,
-                targetItem: new PathRuleConfig('', '')
-            }
-        };
-    }
-
-    onAddPathConfirm({ localState, rules, setting }: AppState) {
-        const cloneRules = rules.concat();
-        const { targetItem, targetItemIdx } = localState;
-        const { isHttps, ...defConfig } = setting.defRuleConfig
-
-        // merge with user config before added
-        Object.assign(targetItem, defConfig);
-        cloneRules[targetItemIdx].paths.push(targetItem);
-
-        return {
-            rules: cloneRules,
-            localState: {
-                ...localState,
-                currModalId: null,
-                targetItemIdx: null,
-                allowModalConfirm: false,
-                isTargetItemIdValid: false,
-                isTargetItemValValid: false,
-            }
-        };
-    }
-
-    // Modal Input (common)
-    onEditItemIdChange({ localState }: AppState, { val, validState }) {
-        const { targetItem, isTargetItemValValid } = localState;
-        return {
-            localState: {
-                ...localState,
-                isTargetItemIdValid: validState.isValid,
-                allowModalConfirm: isTargetItemValValid && validState.isValid,
-                targetItem: {
-                    ...targetItem,
-                    id: val
-                },
-            }
-        };
-    }
-
-    onEditItemValChange({ localState }: AppState, { val, validState }) {
-        const { targetItem, isTargetItemIdValid } = localState;
-        return {
-            localState: {
-                ...localState,
-                isTargetItemValValid: validState.isValid,
-                allowModalConfirm: isTargetItemIdValid && validState.isValid,
-                targetItem: {
-                    ...targetItem,
-                    value: val
-                },
-            }
-        };
-    }
-
-    onImportFileChange({ localState }, { target }, { isValid }) {
-        return {
-            localState: {
-                ...localState,
-                importFile: target.files.item(0),
-                allowModalConfirm: isValid
-            }
-        };
-    }
-
-    async onImportModalConfirm({ localState }: AppState) {
-        return {
-            rules: await fileHandle.readJson(localState.importFile),
-            localState: {
-                ...localState,
-                currView: 'LIST',
-                allowModalConfirm: false,
-                importFile: null,
-                currModalId: null
-            }
-        };
-    }
-
-    onExportFileNameChange({ localState }: AppState, { validState, val }) {
-        const isValid = validState?.isValid ?? true;
-
-        return {
-            localState: {
-                ...localState,
-                allowModalConfirm: isValid,
-                exportFileName: isValid ? val : null
-            }
-        };
-    }
-
-    onExportModalConfirm({ rules, localState }: AppState) {
-        const { exportFileName } = localState;
-        fileHandle.saveJson(rules, exportFileName, true);
-
-        return {
-            localState: {
-                ...localState,
-                currModalId: null,
-                allowModalConfirm: false,
-                exportFileName: null
-            }
-        };
-    }
-
-    //// Helper (used in Reflect only)
+    //// HELPER (used in Reflect only)
     /**
      *
      * Formula for calculating a row's end index used for rows removal at a specific page when all rows are selected
@@ -640,7 +639,6 @@ export class StateHandler extends StateHandle.BaseStoreHandler {
      * 2          | 1        | 0               | 0               | 1
      * 2          | 1        | 1               | 1               | 2
      */
-    // TODO: param type & rtn type
     getRowIndexCtx({ pgnIncrmIdx, pgnItemStartIdx, pgnItemEndIdx, totalRules }) {
         // either the total no. of results per page OR the total results
         // - e.g. 10 per page, 5 total results --> max no. of items shown on that page is 5
