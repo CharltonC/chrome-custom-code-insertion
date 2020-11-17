@@ -52,6 +52,13 @@ export const TestUtil = {
     },
 
     triggerEvt(elem: HTMLElement, evtType: string, EvtCls: IEvtCls = Event, bubbles = true): void {
+        // Cater for Checkbox/Radio element so it doesnt have to pass `EvtCls` param
+        const { tagName, type } = elem as HTMLInputElement;
+        const isCheckboxOrRadioClick = tagName.toLowerCase() === 'input'
+            && (type === 'checkbox' || type === 'radio')
+            && evtType === 'click';
+        EvtCls = isCheckboxOrRadioClick ? MouseEvent : EvtCls;
+
         act(() => {
             elem.dispatchEvent(new EvtCls(evtType, { bubbles }));
         });
